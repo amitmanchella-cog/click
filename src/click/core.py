@@ -2625,6 +2625,11 @@ class Parameter(ABC):
                 )
                 echo(style(message, fg="red"), err=True)
 
+            # Expose the source while the type conversion and callback run, so
+            # they can call ``ctx.get_parameter_source()``. The slot arbitration
+            # below restores the previous source if this parameter does not win.
+            ctx.set_parameter_source(self.name, source)
+
             # Process the value through the parameter's type.
             try:
                 value = self.process_value(ctx, value)
@@ -2658,10 +2663,8 @@ class Parameter(ABC):
             if self.expose_value:
                 ctx.params[self.name] = value
                 ctx._param_default_explicit[self.name] = self._default_explicit
-        elif existing_source is None:
-            # Nothing has claimed the slot yet. Record at least our source so downstream
-            # lookups don't return ``None``.
-            ctx.set_parameter_source(self.name, source)
+        elif existing_source is not None:
+            ctx.set_parameter_source(self.name, existing_source)
 
         return value, args
 

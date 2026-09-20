@@ -265,6 +265,114 @@ def test_default_map_source(runner, args, default_map, expected_value, expected_
     assert f"source={expected_source}" in result.output
 
 
+@pytest.mark.parametrize(
+    ("option_args", "invoke_args", "expect"),
+    [
+        pytest.param({}, {}, click.ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            {},
+            {"default_map": {"value": "mapped"}},
+            click.ParameterSource.DEFAULT_MAP,
+            id="default_map",
+        ),
+        pytest.param(
+            {},
+            {"args": ["--value", "cli"]},
+            click.ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"envvar": "VALUE"},
+            {"env": {"VALUE": "env"}},
+            click.ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+    ],
+)
+def test_parameter_source_during_convert(runner, option_args, invoke_args, expect):
+    """``get_parameter_source()`` reports the correct origin while a value is
+    converted by the parameter's type, not only after parsing completes.
+    """
+
+    seen = {}
+
+    class Source(click.ParamType):
+        name = "source"
+
+        def convert(self, value, param, ctx):
+            seen["source"] = ctx.get_parameter_source(param.name)
+            return value
+
+    @click.command()
+    @click.option("--value", type=Source(), default="original", **option_args)
+    @click.pass_context
+    def cli(ctx, value):
+        seen["after"] = ctx.get_parameter_source("value")
+        click.echo(repr(value))
+
+    result = runner.invoke(cli, **invoke_args)
+    assert not result.exception
+    assert seen["source"] is expect
+    assert seen["after"] is expect
+
+
+@pytest.mark.parametrize("is_eager", [True, False])
+def test_parameter_source_during_callback(runner, is_eager):
+    """``get_parameter_source()`` reports the correct origin while a
+    parameter's callback runs, for eager and non-eager options.
+    """
+
+    seen = {}
+
+    def callback(ctx, param, value):
+        seen["source"] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.option("--flag", is_flag=True, is_eager=is_eager, callback=callback)
+    @click.pass_context
+    def cli(ctx, flag):
+        seen["after"] = ctx.get_parameter_source("flag")
+        click.echo(repr(flag))
+
+    result = runner.invoke(cli, ["--flag"])
+    assert not result.exception
+    assert seen["source"] is click.ParameterSource.COMMANDLINE
+    assert seen["after"] is click.ParameterSource.COMMANDLINE
+
+
+def test_parameter_source_during_prompt(runner):
+    """``get_parameter_source()`` reports ``PROMPT`` during type conversion
+    and the callback of a prompted option.
+    """
+
+    seen = {}
+
+    class Source(click.ParamType):
+        name = "source"
+
+        def convert(self, value, param, ctx):
+            seen["convert"] = ctx.get_parameter_source(param.name)
+            return value
+
+    def callback(ctx, param, value):
+        seen["callback"] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.option("--name", prompt=True, type=Source(), callback=callback)
+    @click.pass_context
+    def cli(ctx, name):
+        seen["after"] = ctx.get_parameter_source("name")
+        click.echo(repr(name))
+
+    result = runner.invoke(cli, [], input="Alice\n")
+    assert not result.exception
+    assert seen["convert"] is click.ParameterSource.PROMPT
+    assert seen["callback"] is click.ParameterSource.PROMPT
+    assert seen["after"] is click.ParameterSource.PROMPT
+
+
 def test_lookup_default_override_respected(runner):
     """A subclass override of ``lookup_default()`` should be called by Click
     internals, not bypassed by a private method.

@@ -2625,6 +2625,33 @@ class Parameter(ABC):
                 )
                 echo(style(message, fg="red"), err=True)
 
+            # Arbitrate the slot when several parameters target the same
+            # variable name (feature-switch groups). This is computed before
+            # processing the value so that ``get_parameter_source`` reports
+            # the correct source while the type conversion and callback run.
+            # See: https://github.com/pallets/click/issues/3403
+            slot_empty = existing_value is UNSET
+            more_explicit = existing_source is not None and source < existing_source
+            same_source = existing_source is not None and source == existing_source
+            auto_would_downgrade_explicit = (
+                same_source
+                and source == ParameterSource.DEFAULT
+                and existing_default_explicit
+                and not self._default_explicit
+            )
+            is_winner = (
+                slot_empty
+                or more_explicit
+                or (same_source and not auto_would_downgrade_explicit)
+            )
+
+            # Expose the incoming source while the value is converted and the
+            # callback runs, but only if this option wins the slot. A losing
+            # option must not overwrite the source of the option that already
+            # claimed the slot.
+            if is_winner:
+                ctx.set_parameter_source(self.name, source)
+
             # Process the value through the parameter's type.
             try:
                 value = self.process_value(ctx, value)
@@ -2636,25 +2663,7 @@ class Parameter(ABC):
                 # to UNSET, which will be interpreted as a missing value.
                 value = UNSET
 
-        # Arbitrate the slot when several parameters target the same variable
-        # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
-        slot_empty = existing_value is UNSET
-        more_explicit = existing_source is not None and source < existing_source
-        same_source = existing_source is not None and source == existing_source
-        auto_would_downgrade_explicit = (
-            same_source
-            and source == ParameterSource.DEFAULT
-            and existing_default_explicit
-            and not self._default_explicit
-        )
-        is_winner = (
-            slot_empty
-            or more_explicit
-            or (same_source and not auto_would_downgrade_explicit)
-        )
-
         if is_winner:
-            ctx.set_parameter_source(self.name, source)
             if self.expose_value:
                 ctx.params[self.name] = value
                 ctx._param_default_explicit[self.name] = self._default_explicit
@@ -3368,6 +3377,10 @@ class Option(Parameter):
         if value is FLAG_NEEDS_VALUE:
             # If the option allows for a prompt, we start an interaction with the user.
             if self.prompt is not None and not ctx.resilient_parsing:
+                # Expose the prompt source before the value is processed so that
+                # ``get_parameter_source`` reports ``PROMPT`` during the type
+                # conversion and callback.
+                ctx.set_parameter_source(self.name, ParameterSource.PROMPT)
                 value = self.prompt_for_value(ctx)
                 source = ParameterSource.PROMPT
             # Else the flag takes its flag_value as value.
@@ -3406,6 +3419,10 @@ class Option(Parameter):
             and (self.required or self.prompt_required)
             and not ctx.resilient_parsing
         ):
+            # Expose the prompt source before the value is processed so that
+            # ``get_parameter_source`` reports ``PROMPT`` during the type
+            # conversion and callback.
+            ctx.set_parameter_source(self.name, ParameterSource.PROMPT)
             value = self.prompt_for_value(ctx)
             source = ParameterSource.PROMPT
 

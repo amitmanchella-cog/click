@@ -2896,6 +2896,49 @@ def test_bool_flag_group_competition_with_default_map(
 
 
 @pytest.mark.parametrize(
+    ("envvar_value", "default_map", "args", "expected"),
+    [
+        (None, None, [], click.ParameterSource.DEFAULT),
+        (None, None, ["--without-xyz"], click.ParameterSource.COMMANDLINE),
+        (
+            None,
+            {"enable_xyz": True},
+            ["--without-xyz"],
+            click.ParameterSource.COMMANDLINE,
+        ),
+        ("1", None, [], click.ParameterSource.ENVIRONMENT),
+        ("1", {"enable_xyz": True}, [], click.ParameterSource.ENVIRONMENT),
+    ],
+)
+def test_bool_flag_group_source(
+    runner, monkeypatch, envvar_value, default_map, args, expected
+):
+    """The source reported for a feature-switch group is the source of the
+    option that won the slot.
+    """
+
+    if envvar_value is not None:
+        monkeypatch.setenv("XYZ", envvar_value)
+
+    @click.command()
+    @click.option("--without-xyz", "enable_xyz", flag_value=False)
+    @click.option(
+        "--with-xyz", "enable_xyz", flag_value=True, default=True, envvar="XYZ"
+    )
+    @click.pass_context
+    def cli(ctx, enable_xyz):
+        click.echo(ctx.get_parameter_source("enable_xyz").name)
+
+    kwargs = {}
+    if default_map is not None:
+        kwargs["default_map"] = default_map
+
+    result = runner.invoke(cli, args, **kwargs)
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == expected.name
+
+
+@pytest.mark.parametrize(
     ("opts", "args", "expected"),
     [
         # Non-boolean feature switch group: classic --upper/--lower

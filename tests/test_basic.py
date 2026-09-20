@@ -780,6 +780,68 @@ def test_help_invalid_default(runner):
     assert "default: not found" in result.output
 
 
+def test_help_argument_named_help(runner):
+    @click.command()
+    @click.argument("help")
+    def cli(help):
+        click.echo(help)
+
+    result = runner.invoke(cli, ["this"])
+    assert result.exit_code == 0
+    assert result.output == "this\n"
+
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+
+
+def test_help_option_named_help(runner):
+    @click.command()
+    @click.option("--assist", "help")
+    def cli(help):
+        click.echo(help)
+
+    result = runner.invoke(cli, ["--assist", "value"])
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "--help" in result.output
+    assert "Show this message and exit." in result.output
+
+
+def test_help_custom_names_param_named_like_help(runner):
+    @click.command(context_settings={"help_option_names": ["--man"]})
+    @click.option("--foo", "man")
+    def cli(man):
+        click.echo(man)
+
+    result = runner.invoke(cli, ["--foo", "bar"])
+    assert result.exit_code == 0
+    assert result.output == "bar\n"
+
+    result = runner.invoke(cli, ["--man"])
+    assert result.exit_code == 0
+    assert "--man" in result.output
+    assert "Show this message and exit." in result.output
+
+
+def test_help_flag_reused_by_option(runner):
+    @click.command()
+    @click.option("--help", default="x")
+    def cli(help):
+        click.echo(help)
+
+    result = runner.invoke(cli, [])
+    assert result.exit_code == 0
+    assert result.output == "x\n"
+
+    result = runner.invoke(cli, ["--help", "y"])
+    assert result.exit_code == 0
+    assert result.output == "y\n"
+
+
 def test_version_option_resolves_import_name_to_distribution(runner, monkeypatch):
     """When ``package_name`` (detected or passed) is an import name that
     differs from its installed distribution name (``PIL`` vs ``Pillow``),

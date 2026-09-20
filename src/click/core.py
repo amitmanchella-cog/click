@@ -1173,7 +1173,19 @@ class Command:
             help_option(*help_option_names)(self)
             self._help_option = self.params.pop()  # type: ignore[assignment]
 
-        return self._help_option
+        # The parser stores values by parameter name. A user parameter that
+        # shares its name with the help option (e.g. ``argument("help")``)
+        # must not clash with it, so give the help option a unique name.
+        help_opt = self._help_option
+        assert help_opt is not None
+        used_names = {param.name for param in self.params}
+        if help_opt.name in used_names:
+            name = f"_{help_opt.name}"
+            while name in used_names:
+                name = f"_{name}"
+            help_opt.name = name
+
+        return help_opt
 
     def make_parser(self, ctx: Context) -> _OptionParser:
         """Creates the underlying option parser for this command."""

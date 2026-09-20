@@ -780,3 +780,130 @@ def test_propagate_opt_prefixes():
     ctx = click.Context(click.Command("test2"), parent=parent)
 
     assert ctx._opt_prefixes == {"-", "--", "!"}
+
+
+@pytest.mark.parametrize(
+    ("option_args", "invoke_args", "expect"),
+    [
+        pytest.param({}, {}, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            {},
+            {"default_map": {"option": 1}},
+            ParameterSource.DEFAULT_MAP,
+            id="default_map",
+        ),
+        pytest.param(
+            {},
+            {"args": ["--option", "1"]},
+            ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"envvar": "NAME"},
+            {"env": {"NAME": "1"}},
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+        pytest.param(
+            {"prompt": True, "default": None},
+            {"input": "1\n"},
+            ParameterSource.PROMPT,
+            id="prompt",
+        ),
+    ],
+)
+def test_parameter_source_during_convert_and_callback(
+    runner, option_args, invoke_args, expect
+):
+    """The source is available while type conversion and the callback run."""
+    seen = {}
+
+    class Source(click.ParamType):
+        name = "source"
+
+        def convert(self, value, param, ctx):
+            seen["convert"] = ctx.get_parameter_source(param.name)
+            return value
+
+    def callback(ctx, param, value):
+        seen["callback"] = ctx.get_parameter_source(param.name)
+        return value
+
+    kwargs = {"default": 1, "type": Source(), "callback": callback}
+    kwargs.update(option_args)
+
+    @click.command()
+    @click.pass_context
+    @click.option("-o", "--option", **kwargs)
+    def cli(ctx, option):
+        return ctx.get_parameter_source("option")
+
+    rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.exception is None, rv.output
+    assert seen == {"convert": expect, "callback": expect}
+    assert rv.return_value == expect
+
+
+def test_parameter_source_eager_callback(runner):
+    seen = {}
+
+    def callback(ctx, param, value):
+        seen["source"] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.option("--debug", is_flag=True, is_eager=True, callback=callback)
+    def cli(debug):
+        pass
+
+    runner.invoke(cli, standalone_mode=False)
+    assert seen["source"] is ParameterSource.DEFAULT
+    runner.invoke(cli, ["--debug"], standalone_mode=False)
+    assert seen["source"] is ParameterSource.COMMANDLINE
+
+
+@pytest.mark.parametrize(
+    ("invoke_args", "expect_value", "expect_source"),
+    [
+        pytest.param({}, True, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            {"args": ["--without-xyz"]},
+            False,
+            ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"args": ["--without-xyz"], "default_map": {"enable_xyz": True}},
+            False,
+            ParameterSource.COMMANDLINE,
+            id="commandline over default_map",
+        ),
+        pytest.param(
+            {"env": {"WITH_XYZ": "1"}},
+            True,
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+        pytest.param(
+            {"env": {"WITH_XYZ": "1"}, "default_map": {"enable_xyz": False}},
+            True,
+            ParameterSource.ENVIRONMENT,
+            id="environment over default_map",
+        ),
+    ],
+)
+def test_parameter_source_feature_switch(
+    runner, invoke_args, expect_value, expect_source
+):
+    @click.command()
+    @click.pass_context
+    @click.option("--without-xyz", "enable_xyz", flag_value=False)
+    @click.option(
+        "--with-xyz", "enable_xyz", flag_value=True, default=True, envvar="WITH_XYZ"
+    )
+    def cli(ctx, enable_xyz):
+        return enable_xyz, ctx.get_parameter_source("enable_xyz")
+
+    rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.exception is None, rv.output
+    assert rv.return_value == (expect_value, expect_source)

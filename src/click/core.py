@@ -1173,6 +1173,15 @@ class Command:
             help_option(*help_option_names)(self)
             self._help_option = self.params.pop()  # type: ignore[assignment]
 
+        # The parser and value lookup use the parameter name as the key, so
+        # a user parameter with the same name must not shadow the help option.
+        taken_names = {param.name for param in self.params}
+        name = self._help_option.name
+
+        while name in taken_names:
+            name = f"_{name}"
+
+        self._help_option.name = name
         return self._help_option
 
     def make_parser(self, ctx: Context) -> _OptionParser:

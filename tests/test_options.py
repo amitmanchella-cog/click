@@ -1141,6 +1141,70 @@ def test_help_option_custom_names_and_class(runner, custom_class, name_specs, ex
         assert expected in result.output
 
 
+def test_argument_named_help_does_not_shadow_help_option(runner):
+    @click.command()
+    @click.argument("help")
+    def cmd(help):
+        click.echo(help)
+
+    result = runner.invoke(cmd, ["this"])
+    assert not result.exception
+    assert result.output == "this\n"
+
+    result = runner.invoke(cmd, ["--help"])
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+    assert "Usage: cmd [OPTIONS] HELP" in result.output
+
+
+def test_option_named_help_does_not_shadow_help_option(runner):
+    @click.command()
+    @click.option("--assist", "help")
+    def cmd(help):
+        click.echo(help)
+
+    result = runner.invoke(cmd, ["--assist", "value"])
+    assert not result.exception
+    assert result.output == "value\n"
+
+    result = runner.invoke(cmd, ["--help"])
+    assert result.exit_code == 0
+    assert "--assist TEXT" in result.output
+    assert "--help" in result.output
+    assert "Show this message and exit." in result.output
+
+
+def test_param_named_like_custom_help_option(runner):
+    @click.command(context_settings={"help_option_names": ["--man"]})
+    @click.option("--foo", "man")
+    def cmd(man):
+        click.echo(man)
+
+    result = runner.invoke(cmd, ["--foo", "bar"])
+    assert not result.exception
+    assert result.output == "bar\n"
+
+    result = runner.invoke(cmd, ["--man"])
+    assert result.exit_code == 0
+    assert "--man" in result.output
+    assert "Show this message and exit." in result.output
+
+
+def test_option_reusing_help_flag_replaces_help_option(runner):
+    @click.command()
+    @click.option("--help", default="x")
+    def cmd(help):
+        click.echo(help)
+
+    result = runner.invoke(cmd, ["--help", "y"])
+    assert not result.exception
+    assert result.output == "y\n"
+
+    result = runner.invoke(cmd, [])
+    assert result.output == "x\n"
+    assert "Show this message and exit." not in result.output
+
+
 def test_bool_flag_with_type(runner):
     @click.command()
     @click.option("--shout/--no-shout", default=False, type=bool)

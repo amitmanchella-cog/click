@@ -5,6 +5,8 @@ Version 8.4.1
 
 Unreleased
 
+-   Restore parameter sources during type conversion and option callbacks,
+    including prompts, while preserving the winning source for feature switches.
 -   Zsh completion scripts parse correctly on Windows. :issue:`3277`
 -   Shell completion of `Choice` `Enum` values produces a valid completion
     result. :issue:`3015`

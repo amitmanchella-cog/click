@@ -1173,6 +1173,18 @@ class Command:
             help_option(*help_option_names)(self)
             self._help_option = self.params.pop()  # type: ignore[assignment]
 
+            # If a user-defined parameter already uses the name inferred for
+            # the help option ("help" by default), rename the help option's
+            # internal destination so the two do not overwrite each other's
+            # parsed values. The name is only used internally, as the help
+            # option does not expose its value.
+            existing_names = {param.name for param in self.params}
+            if self._help_option.name in existing_names:
+                name = self._help_option.name
+                while name in existing_names:
+                    name = f"_{name}"
+                self._help_option.name = name
+
         return self._help_option
 
     def make_parser(self, ctx: Context) -> _OptionParser:

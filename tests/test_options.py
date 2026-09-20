@@ -1141,6 +1141,76 @@ def test_help_option_custom_names_and_class(runner, custom_class, name_specs, ex
         assert expected in result.output
 
 
+def test_help_option_name_conflict_with_argument(runner):
+    """An argument named ``help`` must not interfere with the automatic
+    ``--help`` option, and vice versa."""
+    @click.command()
+    @click.argument("help")
+    def cmd(help):
+        click.echo(help)
+
+    result = runner.invoke(cmd, ["this"])
+    assert result.exit_code == 0
+    assert result.output == "this\n"
+
+    result = runner.invoke(cmd, ["--help"])
+    assert result.exit_code == 0
+    assert "--help  Show this message and exit." in result.output
+
+
+def test_help_option_name_conflict_with_option(runner):
+    """An option whose destination name is ``help`` must not interfere with
+    the automatic ``--help`` option, and vice versa."""
+    @click.command()
+    @click.option("--assist", "help")
+    def cmd(help):
+        click.echo(help)
+
+    result = runner.invoke(cmd, ["--assist", "value"])
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cmd, ["--help"])
+    assert result.exit_code == 0
+    assert "--help" in result.output
+    assert "Show this message and exit." in result.output
+
+
+def test_help_option_name_conflict_custom_names(runner):
+    """Conflict resolution by parameter name also applies to custom
+    ``help_option_names``."""
+    @click.command(context_settings={"help_option_names": ["--man"]})
+    @click.option("--foo", "man")
+    def cmd(man):
+        click.echo(man)
+
+    result = runner.invoke(cmd, ["--foo", "value"])
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cmd, ["--man"])
+    assert result.exit_code == 0
+    assert "--man" in result.output
+    assert "Show this message and exit." in result.output
+
+
+def test_help_option_flag_takeover(runner):
+    """A user option that reuses the ``--help`` flag itself keeps the current
+    behavior: it takes over the flag and no automatic help option is added."""
+    @click.command()
+    @click.option("--help", default="x")
+    def cmd(help):
+        click.echo(help)
+
+    result = runner.invoke(cmd, ["--help", "value"])
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cmd, [])
+    assert result.exit_code == 0
+    assert result.output == "x\n"
+
+
 def test_bool_flag_with_type(runner):
     @click.command()
     @click.option("--shout/--no-shout", default=False, type=bool)

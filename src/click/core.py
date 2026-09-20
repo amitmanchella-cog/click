@@ -2608,6 +2608,9 @@ class Parameter(ABC):
 
         with augment_usage_errors(ctx, param=self):
             value, source = self.consume_value(ctx, opts)
+            # Make this parameter's source available during type conversion and
+            # callbacks. If it loses a shared slot, restore the winner's source below.
+            ctx.set_parameter_source(self.name, source)
 
             # Display a deprecation warning if necessary.
             if (
@@ -2662,6 +2665,8 @@ class Parameter(ABC):
             # Nothing has claimed the slot yet. Record at least our source so downstream
             # lookups don't return ``None``.
             ctx.set_parameter_source(self.name, source)
+        else:
+            ctx.set_parameter_source(self.name, existing_source)
 
         return value, args
 
@@ -3368,8 +3373,9 @@ class Option(Parameter):
         if value is FLAG_NEEDS_VALUE:
             # If the option allows for a prompt, we start an interaction with the user.
             if self.prompt is not None and not ctx.resilient_parsing:
-                value = self.prompt_for_value(ctx)
                 source = ParameterSource.PROMPT
+                ctx.set_parameter_source(self.name, source)
+                value = self.prompt_for_value(ctx)
             # Else the flag takes its flag_value as value.
             else:
                 value = self.flag_value
@@ -3406,8 +3412,10 @@ class Option(Parameter):
             and (self.required or self.prompt_required)
             and not ctx.resilient_parsing
         ):
-            value = self.prompt_for_value(ctx)
             source = ParameterSource.PROMPT
+            # Prompting processes the value before consume_value returns.
+            ctx.set_parameter_source(self.name, source)
+            value = self.prompt_for_value(ctx)
 
         return value, source
 

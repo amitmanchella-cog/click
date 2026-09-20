@@ -761,17 +761,173 @@ def test_exit_not_standalone():
             ParameterSource.ENVIRONMENT,
             id="environment manual",
         ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "2\n"},
+            ParameterSource.PROMPT,
+            id="prompt",
+        ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "\n"},
+            ParameterSource.PROMPT,
+            id="prompt default",
+        ),
+        pytest.param(
+            {"prompt": True, "prompt_required": False},
+            {"args": ["--option"], "input": "2\n"},
+            ParameterSource.PROMPT,
+            id="prompt flag",
+        ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "invalid\n2\n"},
+            ParameterSource.PROMPT,
+            id="prompt retry",
+        ),
     ],
 )
-def test_parameter_source(runner, option_args, invoke_args, expect):
+@pytest.mark.parametrize("is_eager", [False, True])
+@pytest.mark.parametrize("expose_value", [False, True])
+def test_parameter_source(
+    runner, option_args, invoke_args, expect, is_eager, expose_value
+):
+    conversion_sources = []
+    callback_sources = []
+
+    class SourceType(click.types.IntParamType):
+        def convert(self, value, param, ctx):
+            conversion_sources.append(ctx.get_parameter_source(param.name))
+            return super().convert(value, param, ctx)
+
+    def callback(ctx, param, value):
+        callback_sources.append(ctx.get_parameter_source(param.name))
+        return value
+
     @click.command()
     @click.pass_context
-    @click.option("-o", "--option", default=1, **option_args)
-    def cli(ctx, option):
+    @click.option(
+        "-o",
+        "--option",
+        default=1,
+        type=SourceType(),
+        callback=callback,
+        is_eager=is_eager,
+        expose_value=expose_value,
+        **option_args,
+    )
+    def cli(ctx, **kwargs):
         return ctx.get_parameter_source("option")
 
     rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.exception is None
     assert rv.return_value == expect
+    assert conversion_sources and all(s == expect for s in conversion_sources)
+    assert callback_sources and all(s == expect for s in callback_sources)
+
+
+@pytest.mark.parametrize(
+    ("args", "default_map", "expected"),
+    [
+        ([], {}, True),
+        ([], {"debug": False}, True),
+        (["--debug"], {}, True),
+        (["--no-debug"], {"debug": True}, False),
+    ],
+)
+def test_eager_flag_callback_preserves_external_default(
+    runner, args, default_map, expected
+):
+    # An application's eager callback may only override an existing setting
+    # when the user explicitly passes the flag, as Flask does for --debug.
+    settings = {"debug": True}
+
+    def callback(ctx, param, value):
+        if ctx.get_parameter_source(param.name) not in (
+            ParameterSource.DEFAULT,
+            ParameterSource.DEFAULT_MAP,
+        ):
+            settings["debug"] = value
+
+    @click.command()
+    @click.option(
+        "--debug/--no-debug", is_eager=True, expose_value=False, callback=callback
+    )
+    def cli():
+        return settings["debug"]
+
+    result = runner.invoke(cli, args, default_map=default_map, standalone_mode=False)
+    assert result.exception is None
+    assert result.return_value is expected
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize(
+    ("args", "env", "default_map", "value", "source"),
+    [
+        ([], {}, {}, True, ParameterSource.DEFAULT),
+        (["--without-xyz"], {}, {}, False, ParameterSource.COMMANDLINE),
+        (
+            ["--without-xyz"],
+            {},
+            {"enable_xyz": True},
+            False,
+            ParameterSource.COMMANDLINE,
+        ),
+        ([], {}, {"enable_xyz": False}, False, ParameterSource.DEFAULT_MAP),
+        ([], {"XYZ": "1"}, {}, True, ParameterSource.ENVIRONMENT),
+        (
+            [],
+            {"XYZ": "1"},
+            {"enable_xyz": False},
+            True,
+            ParameterSource.ENVIRONMENT,
+        ),
+    ],
+)
+def test_parameter_source_shared_destination(
+    runner, reverse, args, env, default_map, value, source
+):
+    callback_sources = {}
+
+    def callback(ctx, param, value):
+        callback_sources[param.opts[0]] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.option("--without-xyz", "enable_xyz", flag_value=False, callback=callback)
+    @click.option(
+        "--with-xyz",
+        "enable_xyz",
+        flag_value=True,
+        default=True,
+        envvar="XYZ",
+        callback=callback,
+    )
+    @click.pass_context
+    def cli(ctx, enable_xyz):
+        return enable_xyz, ctx.get_parameter_source("enable_xyz")
+
+    if reverse:
+        cli.params.reverse()
+
+    result = runner.invoke(
+        cli,
+        args,
+        env={"XYZ": None, **env},
+        default_map=default_map,
+        standalone_mode=False,
+    )
+    assert result.exception is None
+    assert result.return_value == (value, source)
+    assert callback_sources["--with-xyz"] == source
+    assert callback_sources["--without-xyz"] == (
+        ParameterSource.COMMANDLINE
+        if args
+        else ParameterSource.DEFAULT_MAP
+        if default_map
+        else ParameterSource.DEFAULT
+    )
 
 
 def test_propagate_opt_prefixes():

@@ -774,6 +774,71 @@ def test_parameter_source(runner, option_args, invoke_args, expect):
     assert rv.return_value == expect
 
 
+@pytest.mark.parametrize(
+    ("invoke_kwargs", "expected"),
+    [
+        pytest.param({}, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            {"default_map": {"option": "mapped"}},
+            ParameterSource.DEFAULT_MAP,
+            id="default_map",
+        ),
+        pytest.param(
+            {"args": ["-o", "cli"]},
+            ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"env": {"TEST_OPTION": "env"}},
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "is_eager",
+    [False, True],
+    ids=["callback", "eager_callback"],
+)
+def test_parameter_source_available_during_processing(
+    runner, invoke_kwargs, expected, is_eager
+):
+    """``get_parameter_source()`` reports the source during type conversion and
+    the parameter callback, not only after parsing completes.
+    """
+    convert_sources: list[ParameterSource | None] = []
+    callback_sources: list[ParameterSource | None] = []
+
+    class RecordingType(click.ParamType):
+        name = "recording"
+
+        def convert(self, value, param, ctx):
+            convert_sources.append(ctx.get_parameter_source(param.name))
+            return value
+
+    def callback(ctx, param, value):
+        callback_sources.append(ctx.get_parameter_source(param.name))
+        return value
+
+    @click.command()
+    @click.option(
+        "-o",
+        "--option",
+        type=RecordingType(),
+        default="original",
+        envvar="TEST_OPTION",
+        callback=callback,
+        is_eager=is_eager,
+    )
+    def cli(option):
+        return option
+
+    runner.invoke(cli, standalone_mode=False, **invoke_kwargs)
+
+    assert convert_sources == [expected]
+    assert callback_sources == [expected]
+
+
 def test_propagate_opt_prefixes():
     parent = click.Context(click.Command("test"))
     parent._opt_prefixes = {"-", "--", "!"}

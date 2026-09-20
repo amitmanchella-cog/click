@@ -15,6 +15,7 @@ import click
 from click import Option
 from click import UNPROCESSED
 from click._utils import UNSET
+from click.core import ParameterSource
 from click.testing import CliRunner
 
 
@@ -2893,6 +2894,55 @@ def test_bool_flag_group_competition_with_default_map(
     result = runner.invoke(cli, args, default_map=default_map)
     assert result.exit_code == 0, result.output
     assert result.output == repr(expected)
+
+
+@pytest.mark.parametrize(
+    ("args", "default_map", "env", "expected"),
+    [
+        pytest.param(
+            ["--without-xyz"],
+            {"enable_xyz": True},
+            None,
+            ParameterSource.COMMANDLINE,
+            id="commandline-beats-default-map",
+        ),
+        pytest.param([], None, None, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            [],
+            None,
+            {"XYZ": "1"},
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+        pytest.param(
+            [],
+            {"enable_xyz": True},
+            {"XYZ": "1"},
+            ParameterSource.ENVIRONMENT,
+            id="environment-beats-default-map",
+        ),
+    ],
+)
+def test_bool_flag_group_source(runner, args, default_map, env, expected):
+    """The slot keeps the source of the winning option in a feature-switch group."""
+
+    @click.command()
+    @click.pass_context
+    @click.option("--without-xyz", "enable_xyz", flag_value=False)
+    @click.option(
+        "--with-xyz", "enable_xyz", flag_value=True, default=True, envvar="XYZ"
+    )
+    def cli(ctx, enable_xyz):
+        click.echo(ctx.get_parameter_source("enable_xyz").name, nl=False)
+
+    kwargs = {}
+    if default_map is not None:
+        kwargs["default_map"] = default_map
+    if env is not None:
+        kwargs["env"] = env
+    result = runner.invoke(cli, args, **kwargs)
+    assert result.exit_code == 0, result.output
+    assert result.output == expected.name
 
 
 @pytest.mark.parametrize(

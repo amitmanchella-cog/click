@@ -3,6 +3,8 @@
 Unreleased
 
 - Fix `copy.deepcopy()` and `pickle` on a `Parameter`, `Option` or `Command`. {pr}`3805`
+- Preserve the exit code if another interrupt occurs while reporting an abort
+  or error, or exiting, in standalone mode.
 
 ## Version 8.5.0
 

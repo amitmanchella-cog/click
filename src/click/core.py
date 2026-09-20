@@ -1546,53 +1546,64 @@ class Command:
         # Process shell completion requests and exit early.
         self._main_shell_completion(extra, prog_name, complete_var)
 
+        exit_code = 1
         try:
             try:
-                with self.make_context(prog_name, args, **extra) as ctx:
-                    rv = self.invoke(ctx)
+                try:
+                    with self.make_context(prog_name, args, **extra) as ctx:
+                        rv = self.invoke(ctx)
+                        if not standalone_mode:
+                            return rv
+                        # it's not safe to `ctx.exit(rv)` here!
+                        # note that `rv` may actually contain data like "1" which
+                        # has obvious effects
+                        # more subtle case: `rv=[None, None]` can come out of
+                        # chained commands which all returned `None` -- so it's not
+                        # even always obvious that `rv` indicates success/failure
+                        # by its truthiness/falsiness
+                        ctx.exit()
+                except (EOFError, KeyboardInterrupt) as e:
+                    echo(file=sys.stderr)
+                    raise Abort() from e
+                except ClickException as e:
                     if not standalone_mode:
-                        return rv
-                    # it's not safe to `ctx.exit(rv)` here!
-                    # note that `rv` may actually contain data like "1" which
-                    # has obvious effects
-                    # more subtle case: `rv=[None, None]` can come out of
-                    # chained commands which all returned `None` -- so it's not
-                    # even always obvious that `rv` indicates success/failure
-                    # by its truthiness/falsiness
-                    ctx.exit()
-            except (EOFError, KeyboardInterrupt) as e:
-                echo(file=sys.stderr)
-                raise Abort() from e
-            except ClickException as e:
+                        raise
+                    exit_code = e.exit_code
+                    e.show()
+                    sys.exit(exit_code)
+                except OSError as e:
+                    if e.errno == errno.EPIPE:
+                        sys.stdout = t.cast(t.TextIO, _PacifyFlushWrapper(sys.stdout))
+                        sys.stderr = t.cast(t.TextIO, _PacifyFlushWrapper(sys.stderr))
+                        sys.exit(1)
+                    else:
+                        raise
+            except Exit as e:
+                if standalone_mode:
+                    exit_code = e.exit_code
+                    sys.exit(exit_code)
+                else:
+                    # in non-standalone mode, return the exit code
+                    # note that this is only reached if `self.invoke` above raises
+                    # an Exit explicitly -- thus bypassing the check there which
+                    # would return its result
+                    # the results of non-standalone execution may therefore be
+                    # somewhat ambiguous: if there are codepaths which lead to
+                    # `ctx.exit(1)` and to `return 1`, the caller won't be able to
+                    # tell the difference between the two
+                    return e.exit_code
+            except Abort:
                 if not standalone_mode:
                     raise
-                e.show()
-                sys.exit(e.exit_code)
-            except OSError as e:
-                if e.errno == errno.EPIPE:
-                    sys.stdout = t.cast(t.TextIO, _PacifyFlushWrapper(sys.stdout))
-                    sys.stderr = t.cast(t.TextIO, _PacifyFlushWrapper(sys.stderr))
-                    sys.exit(1)
-                else:
-                    raise
-        except Exit as e:
-            if standalone_mode:
-                sys.exit(e.exit_code)
-            else:
-                # in non-standalone mode, return the exit code
-                # note that this is only reached if `self.invoke` above raises
-                # an Exit explicitly -- thus bypassing the check there which
-                # would return its result
-                # the results of non-standalone execution may therefore be
-                # somewhat ambiguous: if there are codepaths which lead to
-                # `ctx.exit(1)` and to `return 1`, the caller won't be able to
-                # tell the difference between the two
-                return e.exit_code
-        except Abort:
+                exit_code = 1
+                echo(_("Aborted!"), file=sys.stderr)
+                sys.exit(exit_code)
+        except KeyboardInterrupt:
             if not standalone_mode:
                 raise
-            echo(_("Aborted!"), file=sys.stderr)
-            sys.exit(1)
+            # A further interrupt during reporting or sys.exit() must not
+            # replace the exit code already selected for this command.
+            raise SystemExit(exit_code) from None
 
     def _main_shell_completion(
         self,

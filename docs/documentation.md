@@ -322,7 +322,7 @@ The default placeholder variable ([meta variable](https://en.wikipedia.org/wiki/
 
 ## Help Parameter Customization
 
-Help parameters are automatically added by Click for any command. The default is `--help` but can be overridden by the context setting {attr}`~Context.help_option_names`. Click also performs automatic conflict resolution on the default help parameter, so if a command itself implements a parameter named `help` then the default help will not be run.
+Help parameters are automatically added by Click for any command. The default is `--help` but can be overridden by the context setting {attr}`~Context.help_option_names`. Click also performs automatic conflict resolution on the default help parameter: if a command defines an option using one of the help flags, that flag is removed from the automatic help option. If no help flags remain, the automatic help option is not added. A parameter that only shares the help option's destination name, such as an argument named `help` or an option declared as `click.option('--assist', 'help')`, does not conflict with automatic help.
 
 This example changes the default parameters to `-h` and `--help`
 instead of just `--help`:

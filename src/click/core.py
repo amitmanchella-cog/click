@@ -1171,7 +1171,14 @@ class Command:
 
             # Apply help_option decorator and pop resulting option
             help_option(*help_option_names)(self)
-            self._help_option = self.params.pop()  # type: ignore[assignment]
+            self._help_option = t.cast(Option, self.params.pop())
+
+        # The parser stores values by parameter name. Keep automatic help
+        # separate from user parameters, even when only their names overlap.
+        param_names = {param.name for param in self.params}
+
+        while self._help_option.name in param_names:
+            self._help_option.name = f"{self._help_option.name}_"
 
         return self._help_option
 

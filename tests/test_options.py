@@ -1141,6 +1141,70 @@ def test_help_option_custom_names_and_class(runner, custom_class, name_specs, ex
         assert expected in result.output
 
 
+@pytest.mark.parametrize(
+    ("help_names", "name"),
+    [(["--help"], "help"), (["--man"], "man"), (["-h", "--my-help"], "my_help")],
+)
+@pytest.mark.parametrize("param_type", ["argument", "option"])
+def test_help_option_name_conflict(runner, help_names, name, param_type):
+    if param_type == "argument":
+        param = click.argument(name)
+        args = ["value"]
+    else:
+        param = click.option("--assist", name, required=True)
+        args = ["--assist", "value"]
+
+    @click.command(context_settings={"help_option_names": help_names})
+    @param
+    def cli(**kwargs):
+        assert kwargs == {name: "value"}
+        click.echo(kwargs[name])
+
+    result = runner.invoke(cli, args)
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    for flag in help_names:
+        for help_args in ([flag], [flag, *args], [*args, flag]):
+            result = runner.invoke(cli, help_args)
+            assert result.exit_code == 0
+            assert result.output.startswith("Usage: cli ")
+            assert "Show this message and exit." in result.output
+            assert flag in result.output
+
+
+def test_help_option_name_conflict_with_suffixes(runner):
+    @click.command()
+    @click.argument("help")
+    @click.option("--first", "help_", default="first")
+    @click.option("--second", "help__", default="second")
+    def cli(help, help_, help__):
+        click.echo(f"{help} {help_} {help__}")
+
+    result = runner.invoke(cli, ["value"])
+    assert result.exit_code == 0
+    assert result.output == "value first second\n"
+
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+
+
+@pytest.mark.parametrize("flag", ["--help", "--man"])
+def test_help_option_flag_conflict(runner, flag):
+    @click.command(context_settings={"help_option_names": [flag]})
+    @click.option(flag, "value", default="x")
+    def cli(value):
+        click.echo(value)
+
+    for args, expected in [([], "x\n"), ([flag, "value"], "value\n")]:
+        result = runner.invoke(cli, args)
+        assert result.exit_code == 0
+        assert result.output == expected
+
+    assert cli.get_help_option(click.Context(cli, help_option_names=[flag])) is None
+
+
 def test_bool_flag_with_type(runner):
     @click.command()
     @click.option("--shout/--no-shout", default=False, type=bool)

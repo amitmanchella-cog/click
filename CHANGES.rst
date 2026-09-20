@@ -8,6 +8,9 @@ Unreleased
 -   Zsh completion scripts parse correctly on Windows. :issue:`3277`
 -   Shell completion of `Choice` `Enum` values produces a valid completion
     result. :issue:`3015`
+-   ``Context.get_parameter_source`` returns the parameter's source during
+    type conversion and callbacks (including eager ones), not only after
+    parsing completes. :issue:`3484`
 
 
 Version 8.4.0

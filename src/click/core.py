@@ -1173,6 +1173,24 @@ class Command:
             help_option(*help_option_names)(self)
             self._help_option = self.params.pop()  # type: ignore[assignment]
 
+            # The help option's name is derived from its flag (e.g. ``--help``
+            # -> ``help``). If a user parameter shares that name while using a
+            # different flag, the parser would write both to the same
+            # destination. Give the help option a unique internal name so it
+            # does not interfere with user parameters that merely share its
+            # name. The name is not exposed to the callback, so it only needs
+            # to be unique among the declared parameters.
+            names = {param.name for param in self.params}
+
+            if self._help_option.name in names:
+                name = self._help_option.name
+                index = 1
+
+                while f"{name}_{index}" in names:
+                    index += 1
+
+                self._help_option.name = f"{name}_{index}"
+
         return self._help_option
 
     def make_parser(self, ctx: Context) -> _OptionParser:

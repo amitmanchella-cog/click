@@ -488,6 +488,73 @@ def test_help_param_priority(runner):
     assert result.exit_code == 0
 
 
+def test_help_option_does_not_conflict_with_argument_name(runner):
+    @click.command()
+    @click.argument("help")
+    def cli(help):
+        click.echo(help)
+
+    result = runner.invoke(cli, ["value"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cli, ["--help"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+
+
+def test_help_option_does_not_conflict_with_option_name(runner):
+    @click.command()
+    @click.option("--assist", "help")
+    def cli(help):
+        click.echo(help)
+
+    result = runner.invoke(cli, ["--assist", "value"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cli, ["--help"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+
+
+def test_help_option_does_not_conflict_with_custom_help_name(runner):
+    @click.command(context_settings={"help_option_names": ["--man"]})
+    @click.option("--foo", "man")
+    def cli(man):
+        click.echo(man)
+
+    result = runner.invoke(cli, ["--foo", "value"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cli, ["--man"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+
+
+def test_help_option_is_dropped_when_flag_is_reused(runner):
+    @click.command()
+    @click.option("--help", default="x")
+    def cli(help):
+        click.echo(help)
+
+    result = runner.invoke(cli, ["--help", "value"])
+    assert not result.exception
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 2
+    assert "Show this message and exit." not in result.output
+
+
 def test_unprocessed_options(runner):
     @click.command(context_settings=dict(ignore_unknown_options=True))
     @click.argument("args", nargs=-1, type=click.UNPROCESSED)

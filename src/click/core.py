@@ -2625,6 +2625,30 @@ class Parameter(ABC):
                 )
                 echo(style(message, fg="red"), err=True)
 
+            # Arbitrate the slot when several parameters target the same variable
+            # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
+            slot_empty = existing_value is UNSET
+            more_explicit = existing_source is not None and source < existing_source
+            same_source = existing_source is not None and source == existing_source
+            auto_would_downgrade_explicit = (
+                same_source
+                and source == ParameterSource.DEFAULT
+                and existing_default_explicit
+                and not self._default_explicit
+            )
+            is_winner = (
+                slot_empty
+                or more_explicit
+                or (same_source and not auto_would_downgrade_explicit)
+            )
+
+            # Record the source before converting the value and invoking the callback,
+            # so ``ctx.get_parameter_source`` returns the correct source while those
+            # run. The slot keeps the source of the option that won it when several
+            # parameters share a destination.
+            if is_winner or existing_source is None:
+                ctx.set_parameter_source(self.name, source)
+
             # Process the value through the parameter's type.
             try:
                 value = self.process_value(ctx, value)
@@ -2636,32 +2660,9 @@ class Parameter(ABC):
                 # to UNSET, which will be interpreted as a missing value.
                 value = UNSET
 
-        # Arbitrate the slot when several parameters target the same variable
-        # name (feature-switch groups). See: https://github.com/pallets/click/issues/3403
-        slot_empty = existing_value is UNSET
-        more_explicit = existing_source is not None and source < existing_source
-        same_source = existing_source is not None and source == existing_source
-        auto_would_downgrade_explicit = (
-            same_source
-            and source == ParameterSource.DEFAULT
-            and existing_default_explicit
-            and not self._default_explicit
-        )
-        is_winner = (
-            slot_empty
-            or more_explicit
-            or (same_source and not auto_would_downgrade_explicit)
-        )
-
-        if is_winner:
-            ctx.set_parameter_source(self.name, source)
-            if self.expose_value:
-                ctx.params[self.name] = value
-                ctx._param_default_explicit[self.name] = self._default_explicit
-        elif existing_source is None:
-            # Nothing has claimed the slot yet. Record at least our source so downstream
-            # lookups don't return ``None``.
-            ctx.set_parameter_source(self.name, source)
+        if is_winner and self.expose_value:
+            ctx.params[self.name] = value
+            ctx._param_default_explicit[self.name] = self._default_explicit
 
         return value, args
 

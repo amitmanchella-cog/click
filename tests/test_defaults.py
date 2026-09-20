@@ -164,6 +164,42 @@ def test_shared_param_prefers_first_default(runner):
     assert "green" in result.output
 
 
+def test_shared_param_source_keeps_winner(runner):
+    """The source of a feature-switch slot is the option that won the slot."""
+
+    @click.command()
+    @click.option(
+        "--with-xyz",
+        "enable_xyz",
+        flag_value=True,
+        default=True,
+        envvar="ENABLE_XYZ",
+    )
+    @click.option("--without-xyz", "enable_xyz", flag_value=False)
+    @click.pass_context
+    def cli(ctx, enable_xyz):
+        source = ctx.get_parameter_source("enable_xyz")
+        click.echo(f"value={enable_xyz!r} source={source.name}")
+
+    # Nothing passed: the ``--with-xyz`` default wins.
+    result = runner.invoke(cli, [])
+    assert result.output == "value=True source=DEFAULT\n"
+
+    # ``--without-xyz`` wins the slot over the default, even when a ``default_map``
+    # supplies the shared destination.
+    result = runner.invoke(cli, ["--without-xyz"])
+    assert result.output == "value=False source=COMMANDLINE\n"
+    result = runner.invoke(cli, ["--without-xyz"], default_map={"enable_xyz": True})
+    assert result.output == "value=False source=COMMANDLINE\n"
+
+    # ``--with-xyz`` envvar wins over a ``default_map`` supplying the shared
+    # destination.
+    result = runner.invoke(
+        cli, [], default_map={"enable_xyz": False}, env={"ENABLE_XYZ": "1"}
+    )
+    assert result.output == "value=True source=ENVIRONMENT\n"
+
+
 @pytest.mark.parametrize(
     ("default_map", "key", "expected"),
     [

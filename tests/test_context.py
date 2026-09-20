@@ -774,6 +774,88 @@ def test_parameter_source(runner, option_args, invoke_args, expect):
     assert rv.return_value == expect
 
 
+class SourceType(click.ParamType):
+    name = "source"
+
+    def convert(self, value, param, ctx):
+        return ctx.get_parameter_source(param.name)
+
+
+@pytest.mark.parametrize(
+    ("args", "default_map", "env", "expect"),
+    [
+        pytest.param([], None, None, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            ["--opt", "1"], None, None, ParameterSource.COMMANDLINE, id="commandline"
+        ),
+        pytest.param(
+            [], {"opt": "1"}, None, ParameterSource.DEFAULT_MAP, id="default_map"
+        ),
+        pytest.param(
+            [], None, {"OPT": "1"}, ParameterSource.ENVIRONMENT, id="environment"
+        ),
+    ],
+)
+def test_parameter_source_during_type_conversion(
+    runner, args, default_map, env, expect
+):
+    """``get_parameter_source`` is available while the type converts the value."""
+
+    @click.command()
+    @click.option("--opt", type=SourceType(), default="default", envvar="OPT")
+    @click.pass_context
+    def cli(ctx, opt):
+        click.echo(opt.name)
+
+    kwargs = {}
+    if default_map is not None:
+        kwargs["default_map"] = default_map
+    result = runner.invoke(cli, args, env=env, **kwargs)
+    assert result.output == f"{expect.name}\n"
+
+
+@pytest.mark.parametrize(
+    ("args", "default_map", "env", "expect"),
+    [
+        pytest.param([], None, None, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            ["--opt", "1"], None, None, ParameterSource.COMMANDLINE, id="commandline"
+        ),
+        pytest.param(
+            [], {"opt": "1"}, None, ParameterSource.DEFAULT_MAP, id="default_map"
+        ),
+        pytest.param(
+            [], None, {"OPT": "1"}, ParameterSource.ENVIRONMENT, id="environment"
+        ),
+    ],
+)
+def test_parameter_source_during_eager_callback(
+    runner, args, default_map, env, expect
+):
+    """``get_parameter_source`` is available inside an eager option callback."""
+
+    seen = []
+
+    def callback(ctx, param, value):
+        seen.append(ctx.get_parameter_source(param.name))
+        return value
+
+    @click.command()
+    @click.option(
+        "--opt", default="default", envvar="OPT", is_eager=True, callback=callback
+    )
+    @click.pass_context
+    def cli(ctx, opt):
+        click.echo(opt)
+
+    kwargs = {}
+    if default_map is not None:
+        kwargs["default_map"] = default_map
+    result = runner.invoke(cli, args, env=env, **kwargs)
+    assert not result.exception
+    assert seen == [expect]
+
+
 def test_propagate_opt_prefixes():
     parent = click.Context(click.Command("test"))
     parent._opt_prefixes = {"-", "--", "!"}

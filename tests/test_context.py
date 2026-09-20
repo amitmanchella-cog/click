@@ -774,6 +774,189 @@ def test_parameter_source(runner, option_args, invoke_args, expect):
     assert rv.return_value == expect
 
 
+class SourceType(click.ParamType):
+    """Records ``ctx.get_parameter_source`` as seen during type conversion."""
+
+    name = "source"
+
+    def convert(self, value, param, ctx):
+        return (value, ctx.get_parameter_source(param.name))
+
+
+@pytest.mark.parametrize(
+    ("option_args", "invoke_args", "expect"),
+    [
+        pytest.param(
+            {"default": "x"}, {}, ParameterSource.DEFAULT, id="default"
+        ),
+        pytest.param(
+            {"default": "x"},
+            {"default_map": {"option": "y"}},
+            ParameterSource.DEFAULT_MAP,
+            id="default_map",
+        ),
+        pytest.param(
+            {"default": "x"},
+            {"args": ["--option", "y"]},
+            ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"envvar": "NAME"},
+            {"env": {"NAME": "y"}},
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+    ],
+)
+def test_parameter_source_during_type_conversion(
+    runner, option_args, invoke_args, expect
+):
+    """``get_parameter_source`` returns the source while ``ParamType.convert``
+    runs, not only after parsing completes.
+    """
+
+    @click.command()
+    @click.option("--option", type=SourceType(), **option_args)
+    def cli(option):
+        return option
+
+    rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.return_value[1] == expect
+
+
+def test_parameter_source_during_prompt(runner):
+    """``get_parameter_source`` returns ``PROMPT`` while converting a value
+    obtained from a prompt.
+    """
+    seen = []
+
+    class Record(click.ParamType):
+        name = "record"
+
+        def convert(self, value, param, ctx):
+            seen.append(ctx.get_parameter_source(param.name))
+            return value
+
+    @click.command()
+    @click.option("--option", type=Record(), prompt=True)
+    def cli(option):
+        return option
+
+    rv = runner.invoke(cli, input="y\n", standalone_mode=False)
+    assert rv.return_value == "y"
+    assert seen
+    assert all(source is ParameterSource.PROMPT for source in seen)
+
+
+def test_parameter_source_during_callback(runner):
+    """``get_parameter_source`` returns the source while a parameter's
+    callback runs, including for eager options.
+    """
+    sources = {}
+
+    def record(ctx, param, value):
+        sources[param.name] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.option("--eager", is_flag=True, is_eager=True, callback=record)
+    @click.option("--normal", is_flag=True, callback=record)
+    @click.option("--given", is_flag=True, callback=record)
+    def cli(eager, normal, given):
+        pass
+
+    rv = runner.invoke(cli, ["--given"], standalone_mode=False)
+    assert rv.exception is None
+    assert sources == {
+        "eager": ParameterSource.DEFAULT,
+        "normal": ParameterSource.DEFAULT,
+        "given": ParameterSource.COMMANDLINE,
+    }
+
+
+def test_parameter_source_flag_group_during_callback(runner):
+    """In a feature-switch group sharing one destination, the source seen
+    during each option's callback is that option's own source, while the final
+    source is the winner's.
+    """
+    seen = {}
+
+    def record(ctx, param, value):
+        seen[param.opts[0]] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.pass_context
+    @click.option("--without-xyz", "xyz", flag_value=False, callback=record)
+    @click.option("--with-xyz", "xyz", flag_value=True, default=True, callback=record)
+    def cli(ctx, xyz):
+        return xyz, ctx.get_parameter_source("xyz")
+
+    rv = runner.invoke(cli, ["--without-xyz"], standalone_mode=False)
+    assert rv.return_value == (False, ParameterSource.COMMANDLINE)
+    assert seen["--without-xyz"] == ParameterSource.COMMANDLINE
+
+    rv = runner.invoke(cli, [], standalone_mode=False)
+    assert rv.return_value == (True, ParameterSource.DEFAULT)
+
+
+@pytest.mark.parametrize(
+    ("invoke_kwargs", "expect"),
+    [
+        pytest.param(
+            {"args": ["--without-xyz"], "default_map": {"xyz": True}},
+            (False, ParameterSource.COMMANDLINE),
+            id="commandline beats default_map",
+        ),
+        pytest.param(
+            {"default_map": {"xyz": "true"}},
+            (True, ParameterSource.DEFAULT_MAP),
+            id="default_map",
+        ),
+        pytest.param(
+            {},
+            (True, ParameterSource.DEFAULT),
+            id="default",
+        ),
+    ],
+)
+def test_parameter_source_flag_group_final(runner, invoke_kwargs, expect):
+    """The final source of a shared destination is that of the option that
+    won the slot, even when a ``default_map`` supplies the same name.
+    """
+
+    @click.command()
+    @click.pass_context
+    @click.option("--without-xyz", "xyz", flag_value=False)
+    @click.option("--with-xyz", "xyz", flag_value=True, default=True)
+    def cli(ctx, xyz):
+        return xyz, ctx.get_parameter_source("xyz")
+
+    rv = runner.invoke(cli, standalone_mode=False, **invoke_kwargs)
+    assert rv.return_value == expect
+
+
+def test_parameter_source_flag_group_envvar(runner, monkeypatch):
+    """An envvar on the winning option of a shared destination reports
+    ``ENVIRONMENT``, even when a ``default_map`` supplies the same name.
+    """
+    monkeypatch.setenv("WITH_XYZ", "1")
+
+    @click.command()
+    @click.pass_context
+    @click.option("--without-xyz", "xyz", flag_value=False)
+    @click.option(
+        "--with-xyz", "xyz", flag_value=True, default=True, envvar="WITH_XYZ"
+    )
+    def cli(ctx, xyz):
+        return xyz, ctx.get_parameter_source("xyz")
+
+    for default_map in (None, {"xyz": False}):
+        rv = runner.invoke(cli, standalone_mode=False, default_map=default_map)
+        assert rv.return_value == (True, ParameterSource.ENVIRONMENT)
+
+
 def test_propagate_opt_prefixes():
     parent = click.Context(click.Command("test"))
     parent._opt_prefixes = {"-", "--", "!"}

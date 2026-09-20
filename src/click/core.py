@@ -2609,6 +2609,13 @@ class Parameter(ABC):
         with augment_usage_errors(ctx, param=self):
             value, source = self.consume_value(ctx, opts)
 
+            # Record the source now so ``ctx.get_parameter_source`` returns a
+            # meaningful value while type conversion and the parameter's
+            # callback run below. If another parameter sharing this slot already
+            # claimed it and wins the arbitration, the previous source is
+            # restored afterwards.
+            ctx.set_parameter_source(self.name, source)
+
             # Display a deprecation warning if necessary.
             if (
                 self.deprecated
@@ -2658,10 +2665,11 @@ class Parameter(ABC):
             if self.expose_value:
                 ctx.params[self.name] = value
                 ctx._param_default_explicit[self.name] = self._default_explicit
-        elif existing_source is None:
-            # Nothing has claimed the slot yet. Record at least our source so downstream
-            # lookups don't return ``None``.
-            ctx.set_parameter_source(self.name, source)
+        elif existing_source is not None:
+            # Another parameter already claimed this slot and keeps it. Restore
+            # its source, which was temporarily overwritten above so that it was
+            # visible during this parameter's processing.
+            ctx.set_parameter_source(self.name, existing_source)
 
         return value, args
 
@@ -3240,6 +3248,11 @@ class Option(Parameter):
         value as result.
         """
         assert self.prompt is not None
+
+        # Record the source so ``ctx.get_parameter_source`` returns ``PROMPT``
+        # while type conversion and the parameter's callback run through
+        # ``process_value`` below.
+        ctx.set_parameter_source(self.name, ParameterSource.PROMPT)
 
         # Calculate the default before prompting anything to lock in the value before
         # attempting any user interaction.

@@ -79,6 +79,20 @@ def _complete_visible_commands(
                 yield name, command
 
 
+def _call_ignoring_interrupt(
+    func: t.Callable[..., t.Any], *args: t.Any, **kwargs: t.Any
+) -> None:
+    """Call ``func`` while reporting an outcome in standalone mode. A
+    ``KeyboardInterrupt`` arriving at this point must not escape as a
+    traceback or change the exit code that has already been decided, so
+    it is ignored (the message may be lost).
+    """
+    try:
+        func(*args, **kwargs)
+    except KeyboardInterrupt:
+        pass
+
+
 def _check_nested_chain(
     base_command: Group, cmd_name: str, cmd: Command, register: bool = False
 ) -> None:
@@ -1561,12 +1575,15 @@ class Command:
                     # by its truthiness/falsiness
                     ctx.exit()
             except (EOFError, KeyboardInterrupt) as e:
-                echo(file=sys.stderr)
+                if standalone_mode:
+                    _call_ignoring_interrupt(echo, file=sys.stderr)
+                else:
+                    echo(file=sys.stderr)
                 raise Abort() from e
             except ClickException as e:
                 if not standalone_mode:
                     raise
-                e.show()
+                _call_ignoring_interrupt(e.show)
                 sys.exit(e.exit_code)
             except OSError as e:
                 if e.errno == errno.EPIPE:
@@ -1591,7 +1608,7 @@ class Command:
         except Abort:
             if not standalone_mode:
                 raise
-            echo(_("Aborted!"), file=sys.stderr)
+            _call_ignoring_interrupt(echo, _("Aborted!"), file=sys.stderr)
             sys.exit(1)
 
     def _main_shell_completion(

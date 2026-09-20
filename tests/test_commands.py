@@ -1,4 +1,6 @@
+import io
 import re
+import sys
 
 import pytest
 
@@ -666,6 +668,116 @@ def test_abort_exceptions_with_disabled_standalone_mode(runner, exc):
     assert rv.exit_code == 1
     assert isinstance(rv.exception.__cause__, exc)
     assert rv.exception.__cause__.args == ("catch me!",)
+
+
+class _InterruptingStderr:
+    """A stderr stand-in that raises ``KeyboardInterrupt`` as soon as
+    Click tries to use it, simulating a second interrupt arriving while
+    an outcome is being reported.
+    """
+
+    def isatty(self):
+        raise KeyboardInterrupt()
+
+    def write(self, data):
+        raise KeyboardInterrupt()
+
+    def flush(self):
+        pass
+
+
+@pytest.mark.parametrize("exc", (EOFError, KeyboardInterrupt))
+def test_late_interrupt_during_abort_message_keeps_exit_code(monkeypatch, exc):
+    @click.command()
+    def cli():
+        raise exc()
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], "cli")
+
+    assert exc_info.value.code == 1
+
+
+def test_late_interrupt_during_prompt_abort_keeps_exit_code(monkeypatch):
+    @click.command()
+    @click.option("--name", prompt="Name")
+    def cli(name):
+        pass
+
+    def interrupted_prompt(*args, **kwargs):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(click.termui, "visible_prompt_func", interrupted_prompt)
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], "cli")
+
+    assert exc_info.value.code == 1
+
+
+def test_late_interrupt_during_click_exception_keeps_exit_code(monkeypatch):
+    @click.command()
+    def cli():
+        raise click.ClickException("boom")
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], "cli")
+
+    assert exc_info.value.code == 1
+
+
+def test_late_interrupt_during_usage_error_keeps_exit_code(monkeypatch):
+    @click.command()
+    def cli():
+        pass
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["--unknown"], "cli")
+
+    assert exc_info.value.code == 2
+
+
+def test_successful_run_exits_zero_with_interrupting_stderr(monkeypatch):
+    @click.command()
+    def cli():
+        pass
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], "cli")
+
+    assert exc_info.value.code == 0
+
+
+def test_abort_without_late_interrupt_unchanged(runner):
+    @click.command()
+    def cli():
+        raise KeyboardInterrupt()
+
+    result = runner.invoke(cli)
+    assert result.exit_code == 1
+    assert result.stderr == "\nAborted!\n"
+
+
+@pytest.mark.parametrize("exc", (EOFError, KeyboardInterrupt))
+def test_late_interrupt_propagates_with_disabled_standalone_mode(monkeypatch, exc):
+    @click.command()
+    def cli():
+        raise exc("catch me!")
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.main([], "cli", standalone_mode=False)
 
 
 def test_unknown_command(runner):

@@ -1173,6 +1173,13 @@ class Command:
             help_option(*help_option_names)(self)
             self._help_option = self.params.pop()  # type: ignore[assignment]
 
+        # Parser values are keyed by parameter name. Keep the automatic help
+        # option separate from user parameters, even when its flag is distinct.
+        # Check the cached option too, since parameters can be added later.
+        parameter_names = {param.name for param in self.params}
+        while self._help_option.name in parameter_names:
+            self._help_option.name = f"_{self._help_option.name}"
+
         return self._help_option
 
     def make_parser(self, ctx: Context) -> _OptionParser:

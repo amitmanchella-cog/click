@@ -2,6 +2,8 @@
 
 Unreleased
 
+- Parameters sharing the automatic help option's name no longer interfere with
+  parsing or displaying help. Reusing a help flag still overrides that flag.
 - Supported versions of Windows enable ANSI terminal styles by default.
   Colorama is no longer a dependency and is not used. {issue}`2986` {pr}`3505`
 - {class}`Argument` accepts a `help` parameter, and help output includes

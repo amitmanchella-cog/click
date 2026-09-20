@@ -249,6 +249,78 @@ def test_formatting_usage_custom_help(runner):
     ]
 
 
+@pytest.mark.parametrize("help_name", ["help", "man", "my_help"])
+@pytest.mark.parametrize("param_type", ["argument", "option"])
+def test_help_option_parameter_name_conflict(runner, help_name, param_type):
+    help_flag = f"--{help_name.replace('_', '-')}"
+    if param_type == "argument":
+        parameter = click.argument(help_name)
+        value_args = ["value"]
+    else:
+        parameter = click.option("--assist", help_name, required=True)
+        value_args = ["--assist", "value"]
+
+    @click.command(context_settings={"help_option_names": [help_flag]})
+    @parameter
+    @click.option("--other", f"_{help_name}", default="other")
+    def cli(**kwargs):
+        assert kwargs == {help_name: "value", f"_{help_name}": "other"}
+        click.echo(kwargs[help_name])
+
+    result = runner.invoke(cli, value_args)
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+    for args in ([help_flag], [help_flag, *value_args], [*value_args, help_flag]):
+        result = runner.invoke(cli, args)
+        assert result.exit_code == 0
+        assert result.output.startswith("Usage: cli ")
+        assert f"{help_flag} Show this message and exit." in " ".join(
+            result.output.split()
+        )
+
+    result = runner.invoke(cli, [], default_map={help_name: "value"})
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+
+def test_cached_help_option_parameter_name_conflict(runner):
+    @click.command()
+    def cli(help):
+        click.echo(help)
+
+    ctx = click.Context(cli)
+    help_option = cli.get_help_option(ctx)
+    click.argument("help")(cli)
+
+    result = runner.invoke(cli, ["value"])
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+    assert cli.get_help_option(ctx) is help_option
+
+    result = runner.invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    assert "Show this message and exit." in result.output
+
+
+@pytest.mark.parametrize("help_flag", ["--help", "--man"])
+def test_help_option_flag_conflict(runner, help_flag):
+    @click.command(context_settings={"help_option_names": [help_flag]})
+    @click.option(help_flag, "value", default="x")
+    def cli(value):
+        click.echo(value)
+
+    assert cli.get_help_option(click.Context(cli, **cli.context_settings)) is None
+
+    result = runner.invoke(cli, [])
+    assert result.exit_code == 0
+    assert result.output == "x\n"
+
+    result = runner.invoke(cli, [help_flag, "value"])
+    assert result.exit_code == 0
+    assert result.output == "value\n"
+
+
 @pytest.mark.parametrize(
     ("help_names", "extra_options", "expected_hint"),
     [

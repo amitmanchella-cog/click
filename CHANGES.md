@@ -3,6 +3,9 @@
 Unreleased
 
 - Fix `copy.deepcopy()` and `pickle` on a `Parameter`, `Option` or `Command`. {pr}`3805`
+- In standalone mode, a `KeyboardInterrupt` arriving while `Command.main()`
+  reports an abort or a `ClickException` no longer escapes as a traceback; the
+  already-decided exit code is preserved. {issue}`3818`
 
 ## Version 8.5.0
 

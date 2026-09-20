@@ -79,6 +79,18 @@ def _complete_visible_commands(
                 yield name, command
 
 
+def _quiet_interrupt(f: t.Callable[..., t.Any], *args: t.Any, **kwargs: t.Any) -> None:
+    """Call ``f`` to report an outcome in standalone mode, ignoring a
+    ``KeyboardInterrupt`` or ``EOFError`` raised while doing so. The exit
+    code has already been decided; losing the message is acceptable,
+    losing the exit code is not.
+    """
+    try:
+        f(*args, **kwargs)
+    except (KeyboardInterrupt, EOFError):
+        pass
+
+
 def _check_nested_chain(
     base_command: Group, cmd_name: str, cmd: Command, register: bool = False
 ) -> None:
@@ -1561,12 +1573,15 @@ class Command:
                     # by its truthiness/falsiness
                     ctx.exit()
             except (EOFError, KeyboardInterrupt) as e:
-                echo(file=sys.stderr)
+                if standalone_mode:
+                    _quiet_interrupt(echo, file=sys.stderr)
+                else:
+                    echo(file=sys.stderr)
                 raise Abort() from e
             except ClickException as e:
                 if not standalone_mode:
                     raise
-                e.show()
+                _quiet_interrupt(e.show)
                 sys.exit(e.exit_code)
             except OSError as e:
                 if e.errno == errno.EPIPE:
@@ -1591,7 +1606,7 @@ class Command:
         except Abort:
             if not standalone_mode:
                 raise
-            echo(_("Aborted!"), file=sys.stderr)
+            _quiet_interrupt(echo, _("Aborted!"), file=sys.stderr)
             sys.exit(1)
 
     def _main_shell_completion(

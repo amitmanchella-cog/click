@@ -761,17 +761,133 @@ def test_exit_not_standalone():
             ParameterSource.ENVIRONMENT,
             id="environment manual",
         ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "2\n"},
+            ParameterSource.PROMPT,
+            id="prompt",
+        ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "\n"},
+            ParameterSource.PROMPT,
+            id="prompt default",
+        ),
+        pytest.param(
+            {"prompt": True, "prompt_required": False},
+            {"args": ["--option"], "input": "2\n"},
+            ParameterSource.PROMPT,
+            id="prompt flag",
+        ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "invalid\n2\n"},
+            ParameterSource.PROMPT,
+            id="prompt retry",
+        ),
     ],
 )
-def test_parameter_source(runner, option_args, invoke_args, expect):
+@pytest.mark.parametrize("is_eager", [False, True])
+@pytest.mark.parametrize("expose_value", [False, True])
+def test_parameter_source(
+    runner, option_args, invoke_args, expect, is_eager, expose_value
+):
+    conversions = []
+    callbacks = []
+
+    class SourceType(click.ParamType):
+        name = "source"
+
+        def convert(self, value, param, ctx):
+            conversions.append(ctx.get_parameter_source(param.name))
+            return click.INT(value, param, ctx)
+
+    def callback(ctx, param, value):
+        callbacks.append(ctx.get_parameter_source(param.name))
+        return value
+
     @click.command()
     @click.pass_context
-    @click.option("-o", "--option", default=1, **option_args)
-    def cli(ctx, option):
+    @click.option(
+        "-o",
+        "--option",
+        default=1,
+        type=SourceType(),
+        callback=callback,
+        is_eager=is_eager,
+        expose_value=expose_value,
+        **option_args,
+    )
+    def cli(ctx, **kwargs):
         return ctx.get_parameter_source("option")
 
     rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.exception is None, rv.output
     assert rv.return_value == expect
+    assert conversions and all(source == expect for source in conversions)
+    assert callbacks and all(source == expect for source in callbacks)
+
+
+@pytest.mark.parametrize("is_eager", [False, True])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("default_map", [None, {"enable_xyz": False}])
+@pytest.mark.parametrize("env", [{}, {"ENABLE_XYZ": "1"}])
+@pytest.mark.parametrize("args", [[], ["--without-xyz"], ["--with-xyz"]])
+def test_parameter_source_flag_group(runner, is_eager, reverse, default_map, env, args):
+    callbacks = []
+
+    def callback(ctx, param, value):
+        source = ctx.get_parameter_source(param.name)
+        if args:
+            expected = ParameterSource.COMMANDLINE
+        elif param.envvar in env:
+            expected = ParameterSource.ENVIRONMENT
+        elif default_map is not None:
+            expected = ParameterSource.DEFAULT_MAP
+        else:
+            expected = ParameterSource.DEFAULT
+        callbacks.append((source, expected))
+        return value
+
+    @click.command()
+    @click.option(
+        "--without-xyz",
+        "enable_xyz",
+        flag_value=False,
+        callback=callback,
+        is_eager=is_eager,
+    )
+    @click.option(
+        "--with-xyz",
+        "enable_xyz",
+        flag_value=True,
+        default=True,
+        envvar="ENABLE_XYZ",
+        callback=callback,
+        is_eager=is_eager,
+    )
+    @click.pass_context
+    def cli(ctx, enable_xyz):
+        return enable_xyz, ctx.get_parameter_source("enable_xyz")
+
+    if reverse:
+        cli.params.reverse()
+
+    rv = runner.invoke(
+        cli, args, env=env, default_map=default_map, standalone_mode=False
+    )
+    assert rv.exception is None, rv.output
+    if args:
+        expected = (args == ["--with-xyz"], ParameterSource.COMMANDLINE)
+    elif env:
+        expected = (True, ParameterSource.ENVIRONMENT)
+    elif default_map is not None:
+        expected = (False, ParameterSource.DEFAULT_MAP)
+    else:
+        expected = (True, ParameterSource.DEFAULT)
+    assert rv.return_value == expected
+    assert len(callbacks) == 2
+    assert all(source == expected for source, expected in callbacks)
 
 
 def test_propagate_opt_prefixes():

@@ -5,6 +5,9 @@ Version 8.4.1
 
 Unreleased
 
+-   Make parameter sources available during type conversion and callbacks,
+    including eager callbacks and prompts, while preserving the winning source
+    for options that share a destination.
 -   Zsh completion scripts parse correctly on Windows. :issue:`3277`
 -   Shell completion of `Choice` `Enum` values produces a valid completion
     result. :issue:`3015`

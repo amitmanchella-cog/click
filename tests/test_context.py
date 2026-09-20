@@ -774,6 +774,152 @@ def test_parameter_source(runner, option_args, invoke_args, expect):
     assert rv.return_value == expect
 
 
+@pytest.mark.parametrize(
+    ("option_args", "invoke_args", "expect"),
+    [
+        pytest.param({}, {}, ParameterSource.DEFAULT, id="default"),
+        pytest.param(
+            {},
+            {"default_map": {"option": "1"}},
+            ParameterSource.DEFAULT_MAP,
+            id="default_map",
+        ),
+        pytest.param(
+            {},
+            {"args": ["--option", "1"]},
+            ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"envvar": "NAME"},
+            {"env": {"NAME": "1"}},
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+        pytest.param(
+            {"prompt": True},
+            {"input": "1\n"},
+            ParameterSource.PROMPT,
+            id="prompt",
+        ),
+    ],
+)
+def test_parameter_source_during_type_conversion(
+    runner, option_args, invoke_args, expect
+):
+    """``get_parameter_source()`` returns the real source while the
+    parameter's type conversion runs, not ``None``.
+    """
+
+    class SourceType(click.ParamType):
+        name = "source"
+
+        def convert(self, value, param, ctx):
+            return ctx.get_parameter_source(param.name)
+
+    @click.command()
+    @click.option("--option", type=SourceType(), default="0", **option_args)
+    def cli(option):
+        return option
+
+    rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.return_value == expect
+
+
+def test_parameter_source_during_eager_callback(runner):
+    """``get_parameter_source()`` returns the real source while an eager
+    option callback runs.
+    """
+    sources = {}
+
+    def callback(ctx, param, value):
+        sources[param.name] = ctx.get_parameter_source(param.name)
+        return value
+
+    @click.command()
+    @click.option("--given", is_eager=True, callback=callback)
+    @click.option("--defaulted", is_eager=True, callback=callback, default="x")
+    @click.option(
+        "--env", is_eager=True, callback=callback, envvar="TEST_ENV_OPTION"
+    )
+    def cli(given, defaulted, env):
+        pass
+
+    runner.invoke(
+        cli,
+        ["--given", "1"],
+        env={"TEST_ENV_OPTION": "2"},
+        standalone_mode=False,
+    )
+
+    assert sources == {
+        "given": ParameterSource.COMMANDLINE,
+        "defaulted": ParameterSource.DEFAULT,
+        "env": ParameterSource.ENVIRONMENT,
+    }
+
+
+@pytest.mark.parametrize(
+    ("invoke_args", "expect_value", "expect_source"),
+    [
+        pytest.param(
+            {"args": ["--without-xyz"]},
+            False,
+            ParameterSource.COMMANDLINE,
+            id="commandline",
+        ),
+        pytest.param(
+            {"args": ["--without-xyz"], "default_map": {"enable_xyz": True}},
+            False,
+            ParameterSource.COMMANDLINE,
+            id="commandline over default_map",
+        ),
+        pytest.param(
+            {},
+            True,
+            ParameterSource.DEFAULT,
+            id="default",
+        ),
+        pytest.param(
+            {"env": {"WITH_XYZ": "1"}},
+            True,
+            ParameterSource.ENVIRONMENT,
+            id="environment",
+        ),
+        pytest.param(
+            {"env": {"WITH_XYZ": "1"}, "default_map": {"enable_xyz": False}},
+            True,
+            ParameterSource.ENVIRONMENT,
+            id="environment over default_map",
+        ),
+    ],
+)
+def test_parameter_source_feature_switch_group(
+    runner, invoke_args, expect_value, expect_source
+):
+    """Several options sharing one destination via ``flag_value`` keep the
+    source of the option that won the slot.
+    """
+
+    @click.command()
+    @click.option(
+        "--without-xyz", "enable_xyz", flag_value=False, default=None
+    )
+    @click.option(
+        "--with-xyz",
+        "enable_xyz",
+        flag_value=True,
+        default=True,
+        envvar="WITH_XYZ",
+    )
+    @click.pass_context
+    def cli(ctx, enable_xyz):
+        return enable_xyz, ctx.get_parameter_source("enable_xyz")
+
+    rv = runner.invoke(cli, standalone_mode=False, **invoke_args)
+    assert rv.return_value == (expect_value, expect_source)
+
+
 def test_propagate_opt_prefixes():
     parent = click.Context(click.Command("test"))
     parent._opt_prefixes = {"-", "--", "!"}

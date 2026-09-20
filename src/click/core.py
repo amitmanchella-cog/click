@@ -2625,6 +2625,12 @@ class Parameter(ABC):
                 )
                 echo(style(message, fg="red"), err=True)
 
+            # Publish our source before type conversion and the callback run so
+            # that ``ctx.get_parameter_source()`` returns a meaningful value
+            # while they execute. If we lose the slot arbitration below, the
+            # previous winner's source is restored.
+            ctx.set_parameter_source(self.name, source)
+
             # Process the value through the parameter's type.
             try:
                 value = self.process_value(ctx, value)
@@ -2654,14 +2660,15 @@ class Parameter(ABC):
         )
 
         if is_winner:
-            ctx.set_parameter_source(self.name, source)
             if self.expose_value:
                 ctx.params[self.name] = value
                 ctx._param_default_explicit[self.name] = self._default_explicit
-        elif existing_source is None:
-            # Nothing has claimed the slot yet. Record at least our source so downstream
-            # lookups don't return ``None``.
-            ctx.set_parameter_source(self.name, source)
+        elif existing_source is not None:
+            # Another parameter already claimed the slot with a more explicit
+            # source. Restore it, since we overwrote it before processing.
+            ctx.set_parameter_source(self.name, existing_source)
+        # Else: nothing had claimed the slot before us, so the source we
+        # recorded before processing stands.
 
         return value, args
 
@@ -3368,6 +3375,9 @@ class Option(Parameter):
         if value is FLAG_NEEDS_VALUE:
             # If the option allows for a prompt, we start an interaction with the user.
             if self.prompt is not None and not ctx.resilient_parsing:
+                # Make the source visible to the type conversion and callback
+                # that run inside ``prompt_for_value``.
+                ctx.set_parameter_source(self.name, ParameterSource.PROMPT)
                 value = self.prompt_for_value(ctx)
                 source = ParameterSource.PROMPT
             # Else the flag takes its flag_value as value.
@@ -3406,6 +3416,9 @@ class Option(Parameter):
             and (self.required or self.prompt_required)
             and not ctx.resilient_parsing
         ):
+            # Make the source visible to the type conversion and callback
+            # that run inside ``prompt_for_value``.
+            ctx.set_parameter_source(self.name, ParameterSource.PROMPT)
             value = self.prompt_for_value(ctx)
             source = ParameterSource.PROMPT
 

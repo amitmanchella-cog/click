@@ -14,6 +14,7 @@ from collections import Counter
 from contextlib import AbstractContextManager
 from contextlib import contextmanager
 from contextlib import ExitStack
+from contextlib import suppress
 from functools import update_wrapper
 from gettext import gettext as _
 from gettext import ngettext
@@ -1561,12 +1562,17 @@ class Command:
                     # by its truthiness/falsiness
                     ctx.exit()
             except (EOFError, KeyboardInterrupt) as e:
-                echo(file=sys.stderr)
+                try:
+                    echo(file=sys.stderr)
+                except KeyboardInterrupt:
+                    if not standalone_mode:
+                        raise
                 raise Abort() from e
             except ClickException as e:
                 if not standalone_mode:
                     raise
-                e.show()
+                with suppress(KeyboardInterrupt):
+                    e.show()
                 sys.exit(e.exit_code)
             except OSError as e:
                 if e.errno == errno.EPIPE:
@@ -1591,7 +1597,8 @@ class Command:
         except Abort:
             if not standalone_mode:
                 raise
-            echo(_("Aborted!"), file=sys.stderr)
+            with suppress(KeyboardInterrupt):
+                echo(_("Aborted!"), file=sys.stderr)
             sys.exit(1)
 
     def _main_shell_completion(

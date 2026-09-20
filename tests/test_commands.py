@@ -668,6 +668,73 @@ def test_abort_exceptions_with_disabled_standalone_mode(runner, exc):
     assert rv.exception.__cause__.args == ("catch me!",)
 
 
+class _RaisingStderr:
+    encoding = "utf-8"
+    errors = "strict"
+
+    def isatty(self) -> bool:
+        raise KeyboardInterrupt
+
+    def write(self, s: object) -> int:
+        if isinstance(s, bytes):
+            raise TypeError
+        return len(s)
+
+    def flush(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize("exc", (click.Abort, EOFError, KeyboardInterrupt))
+def test_late_interrupt_during_abort(monkeypatch, exc):
+    @click.command()
+    def cli():
+        raise exc
+
+    monkeypatch.setattr("sys.stderr", _RaisingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], "test", standalone_mode=True)
+
+    assert exc_info.value.code == 1
+
+
+def test_late_interrupt_during_click_exception(monkeypatch):
+    class CustomError(click.ClickException):
+        exit_code = 3
+
+    @click.command()
+    def cli():
+        raise CustomError("oops")
+
+    monkeypatch.setattr("sys.stderr", _RaisingStderr())
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], "test", standalone_mode=True)
+
+    assert exc_info.value.code == 3
+
+
+def test_late_interrupt_propagates_in_non_standalone_mode(monkeypatch):
+    @click.command()
+    def cli():
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("sys.stderr", _RaisingStderr())
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.main([], "test", standalone_mode=False)
+
+
+def test_abort_message_without_late_interrupt(runner):
+    @click.command()
+    def cli():
+        raise KeyboardInterrupt
+
+    result = runner.invoke(cli)
+    assert result.exit_code == 1
+    assert "Aborted!" in result.output
+
+
 def test_unknown_command(runner):
     result = runner.invoke(click.Group(), "unknown")
     assert result.exception

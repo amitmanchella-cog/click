@@ -1561,12 +1561,19 @@ class Command:
                     # by its truthiness/falsiness
                     ctx.exit()
             except (EOFError, KeyboardInterrupt) as e:
-                echo(file=sys.stderr)
+                try:
+                    echo(file=sys.stderr)
+                except KeyboardInterrupt:
+                    if not standalone_mode:
+                        raise
                 raise Abort() from e
             except ClickException as e:
                 if not standalone_mode:
                     raise
-                e.show()
+                try:
+                    e.show()
+                except KeyboardInterrupt:
+                    pass
                 sys.exit(e.exit_code)
             except OSError as e:
                 if e.errno == errno.EPIPE:
@@ -1577,7 +1584,10 @@ class Command:
                     raise
         except Exit as e:
             if standalone_mode:
-                sys.exit(e.exit_code)
+                try:
+                    sys.exit(e.exit_code)
+                except KeyboardInterrupt:
+                    sys.exit(e.exit_code)
             else:
                 # in non-standalone mode, return the exit code
                 # note that this is only reached if `self.invoke` above raises
@@ -1591,7 +1601,10 @@ class Command:
         except Abort:
             if not standalone_mode:
                 raise
-            echo(_("Aborted!"), file=sys.stderr)
+            try:
+                echo(_("Aborted!"), file=sys.stderr)
+            except KeyboardInterrupt:
+                pass
             sys.exit(1)
 
     def _main_shell_completion(

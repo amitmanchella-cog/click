@@ -3,6 +3,11 @@
 Unreleased
 
 - Fix `copy.deepcopy()` and `pickle` on a `Parameter`, `Option` or `Command`. {pr}`3805`
+- A second `KeyboardInterrupt` arriving while a command reports its outcome
+  (for example while printing `Aborted!`) no longer escapes `Command.main()`
+  as a traceback or changes the exit code already decided. In
+  `standalone_mode=False`, the later interrupt still propagates to the
+  caller.
 
 ## Version 8.5.0
 

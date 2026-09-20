@@ -1,4 +1,5 @@
 import re
+import sys
 
 import pytest
 
@@ -666,6 +667,110 @@ def test_abort_exceptions_with_disabled_standalone_mode(runner, exc):
     assert rv.exit_code == 1
     assert isinstance(rv.exception.__cause__, exc)
     assert rv.exception.__cause__.args == ("catch me!",)
+
+
+class _InterruptingStderr:
+    """stderr stand-in that raises ``KeyboardInterrupt`` when written to,
+    simulating a second Ctrl-C arriving while Click reports an outcome."""
+
+    def write(self, *args, **kwargs):
+        raise KeyboardInterrupt
+
+    def isatty(self):
+        raise KeyboardInterrupt
+
+    def flush(self):
+        pass
+
+
+class _InterruptingStdin:
+    """stdin stand-in that raises ``KeyboardInterrupt`` when read,
+    simulating a Ctrl-C arriving at a prompt."""
+
+    def readline(self, *args, **kwargs):
+        raise KeyboardInterrupt
+
+
+@pytest.mark.parametrize("exc", (EOFError, KeyboardInterrupt))
+def test_late_interrupt_during_abort_message(runner, monkeypatch, exc):
+    """A second Ctrl-C while printing ``Aborted!`` must not escape
+    standalone mode nor change the exit code."""
+
+    @click.command()
+    def cli():
+        raise exc("catch me!")
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], standalone_mode=True)
+    assert exc_info.value.code == 1
+
+
+def test_late_interrupt_during_abort_prompt(runner, monkeypatch):
+    """Same race, with the first interrupt coming from a prompt."""
+
+    @click.command()
+    @click.option("--name", prompt="Name")
+    def cli(name):
+        pass
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+    monkeypatch.setattr(sys, "stdin", _InterruptingStdin())
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], standalone_mode=True)
+    assert exc_info.value.code == 1
+
+
+def test_late_interrupt_during_exception_message(runner, monkeypatch):
+    """A Ctrl-C while a ``ClickException`` message is shown must not
+    change its exit code."""
+
+    @click.command()
+    def cli():
+        raise click.UsageError("bad usage")
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], standalone_mode=True)
+    assert exc_info.value.code == 2
+
+
+def test_late_interrupt_during_success_exit(runner, monkeypatch):
+    """A Ctrl-C arriving while exiting after a successful run must not
+    change the exit code."""
+
+    @click.command()
+    def cli():
+        pass
+
+    real_exit = sys.exit
+    calls = 0
+
+    def interrupting_exit(code=0):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise KeyboardInterrupt
+        real_exit(code)
+
+    monkeypatch.setattr(sys, "exit", interrupting_exit)
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main([], standalone_mode=True)
+    assert exc_info.value.code == 0
+
+
+@pytest.mark.parametrize("exc", (EOFError, KeyboardInterrupt))
+def test_late_interrupt_propagates_non_standalone(runner, monkeypatch, exc):
+    """With ``standalone_mode=False``, a second interrupt reaches the
+    caller instead of being swallowed or turned into an exit."""
+
+    @click.command()
+    def cli():
+        raise exc("catch me!")
+
+    monkeypatch.setattr(sys, "stderr", _InterruptingStderr())
+    with pytest.raises(KeyboardInterrupt):
+        cli.main([], standalone_mode=False)
 
 
 def test_unknown_command(runner):
